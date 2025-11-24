@@ -1,0 +1,35 @@
+---
+name: Build Artifacts
+
+on:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  build:
+    name: Build linux amd64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: setup go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: .github/go-version
+      - name: Build amd64
+        env:
+          GOARCH: amd64
+          CGO_ENABLED: 0
+        run: ./build_linux.sh -ldflags '-extldflags -static'
+      - name: Copy files
+        run: cp README.md LICENSE bin/
+      - name: Create archive file
+        working-directory: ./bin
+        run: tar cfzpv ../cni-plugins-linux-amd64.tgz .
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cni-plugins-linux-amd64
+          path: cni-plugins-linux-amd64.tgz
+          retention-days: 30
+          compression-level: 0
