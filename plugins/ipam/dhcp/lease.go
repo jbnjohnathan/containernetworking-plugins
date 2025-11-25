@@ -82,6 +82,7 @@ type DHCPLease struct {
 	resendMax     time.Duration
 	resendTimeout time.Duration
 	broadcast     bool
+	ignoreGateway bool
 	stopping      uint32
 	stop          chan struct{}
 	check         chan struct{}
@@ -167,7 +168,7 @@ func prepareOptions(cniArgs string, provideOptions []ProvideOption, requestOptio
 func AcquireLease(
 	clientID, netns, ifName string,
 	opts []dhcp4.Option,
-	timeout, resendMax time.Duration, resendTimeout time.Duration, broadcast bool,
+	timeout, resendMax time.Duration, resendTimeout time.Duration, broadcast bool, ignoreGateway bool,
 ) (*DHCPLease, error) {
 	errCh := make(chan error, 1)
 
@@ -182,6 +183,7 @@ func AcquireLease(
 		resendMax:     resendMax,
 		resendTimeout: resendTimeout,
 		broadcast:     broadcast,
+		ignoreGateway: ignoreGateway,
 		opts:          opts,
 		cancelFunc:    cancel,
 		ctx:           ctx,
@@ -456,6 +458,9 @@ func (l *DHCPLease) IPNet() (*net.IPNet, error) {
 }
 
 func (l *DHCPLease) Gateway() net.IP {
+	if l.ignoreGateway {
+		return nil
+	}
 	ack := l.latestLease.ACK
 	gws := ack.Router()
 	if len(gws) > 0 {
@@ -474,6 +479,10 @@ func (l *DHCPLease) Routes() []*types.Route {
 	opt121Routes := ack.ClasslessStaticRoute()
 	if len(opt121Routes) > 0 {
 		for _, r := range opt121Routes {
+			// Skip default route (0.0.0.0/0) if ignoreGateway is set
+			if l.ignoreGateway && isDefaultRoute(r.Dest) {
+				continue
+			}
 			route := &types.Route{Dst: *r.Dest, GW: r.Router}
 			// if router is not specified, add SCOPE_LINK so routes are installed
 			if r.Router.IsUnspecified() {
@@ -487,17 +496,39 @@ func (l *DHCPLease) Routes() []*types.Route {
 
 	// Append Static Routes
 	if ack.Options.Has(dhcp4.OptionStaticRoutingTable) {
-		routes = append(routes, parseRoutes(ack.Options.Get(dhcp4.OptionStaticRoutingTable))...)
+		staticRoutes := parseRoutes(ack.Options.Get(dhcp4.OptionStaticRoutingTable))
+		if l.ignoreGateway {
+			// Filter out default routes from static routes
+			for _, r := range staticRoutes {
+				if !isDefaultRoute(&r.Dst) {
+					routes = append(routes, r)
+				}
+			}
+		} else {
+			routes = append(routes, staticRoutes...)
+		}
 	}
 
 	// The CNI spec says even if there is a gateway specified, we must
 	// add a default route in the routes section.
-	if gw := l.Gateway(); gw != nil {
-		_, defaultRoute, _ := net.ParseCIDR("0.0.0.0/0")
-		routes = append(routes, &types.Route{Dst: *defaultRoute, GW: gw})
+	// Skip this if ignoreGateway is set
+	if !l.ignoreGateway {
+		if gw := l.Gateway(); gw != nil {
+			_, defaultRoute, _ := net.ParseCIDR("0.0.0.0/0")
+			routes = append(routes, &types.Route{Dst: *defaultRoute, GW: gw})
+		}
 	}
 
 	return routes
+}
+
+// isDefaultRoute returns true if the given IPNet represents a default route (0.0.0.0/0 or ::/0)
+func isDefaultRoute(ipnet *net.IPNet) bool {
+	if ipnet == nil {
+		return false
+	}
+	ones, _ := ipnet.Mask.Size()
+	return ipnet.IP.IsUnspecified() && ones == 0
 }
 
 // jitter returns a random value within [-span, span) range

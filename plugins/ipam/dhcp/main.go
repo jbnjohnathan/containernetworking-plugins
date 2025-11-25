@@ -53,6 +53,8 @@ type IPAMConfig struct {
 	RequestOptions []RequestOption `json:"request"`
 	// The metric of routes
 	Priority int `json:"priority,omitempty"`
+	// Ignore the default gateway received from the DHCP server
+	IgnoreDefaultGateway bool `json:"ignoreDefaultGateway,omitempty"`
 }
 
 // DHCPOption represents a DHCP option. It can be a number, or a string defined in manual dhcp-options(5).

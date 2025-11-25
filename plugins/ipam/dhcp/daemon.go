@@ -92,7 +92,7 @@ func (d *DHCP) Allocate(args *skel.CmdArgs, result *current.Result) error {
 		hostNetns := d.hostNetnsPrefix + args.Netns
 		l, err = AcquireLease(clientID, hostNetns, args.IfName,
 			opts,
-			d.clientTimeout, d.clientResendMax, d.clientResendTimeout, d.broadcast)
+			d.clientTimeout, d.clientResendMax, d.clientResendTimeout, d.broadcast, conf.IPAM.IgnoreDefaultGateway)
 		if err != nil {
 			return err
 		}
